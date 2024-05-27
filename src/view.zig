@@ -2,7 +2,7 @@ const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 
 const Server = @import("server.zig");
-const Seat = @import("seat.zig");
+const Seat = @import("Seat.zig");
 const util = @import("util.zig");
 
 const View = struct {

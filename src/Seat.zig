@@ -7,8 +7,11 @@ const assert = std.debug.assert;
 const wlr = @import("wlroots");
 const wl = @import("wayland").server.wl;
 
+const server = &@import("main.zig").server;
 const command = @import("command.zig");
 const util = @import("util.zig");
+
+const log = std.log.scoped(.seat);
 
 wlr_seat: *wlr.Seat,
 
@@ -92,7 +95,7 @@ pub fn runCommand(seat: *Seat, args: []const [:0]const u8) void {
 
 fn handleRequestSetSelection(
     listener: *wl.Listener(*wlr.Seat.event.RequestSetSelection),
-                             event: *wlr.Seat.event.RequestSetSelection,
+    event: *wlr.Seat.event.RequestSetSelection,
 ) void {
     const seat: *Seat = @fieldParentPtr("request_set_selection", listener);
     seat.wlr_seat.setSelection(event.source, event.serial);
@@ -100,29 +103,8 @@ fn handleRequestSetSelection(
 
 fn handleRequestStartDrag(
     listener: *wl.Listener(*wlr.Seat.event.RequestStartDrag),
-                          event: *wlr.Seat.event.RequestStartDrag,
-) void {fn handleDragDestroy(listener: *wl.Listener(*wlr.Drag), _: *wlr.Drag) void {
-    const seat: *Seat = @fieldParentPtr("drag_destroy", listener);
-    seat.drag_destroy.link.remove();
-
-    switch (seat.drag) {
-        .none => unreachable,
-        .pointer => {
-            seat.cursor.checkFocusFollowsCursor();
-            seat.cursor.updateState();
-        },
-        .touch => {},
-    }
-    seat.drag = .none;
-}
-
-fn handleRequestSetPrimarySelection(
-    listener: *wl.Listener(*wlr.Seat.event.RequestSetPrimarySelection),
-                                    event: *wlr.Seat.event.RequestSetPrimarySelection,
+    event: *wlr.Seat.event.RequestStartDrag,
 ) void {
-    const seat: *Seat = @fieldParentPtr("request_set_primary_selection", listener);
-    seat.wlr_seat.setPrimarySelection(event.source, event.serial);
-}
     const seat: *Seat = @fieldParentPtr("request_start_drag", listener);
 
     // The start_drag request is ignored by wlroots if a drag is currently in progress.
@@ -142,7 +124,7 @@ fn handleRequestSetPrimarySelection(
     }
 
     log.debug("ignoring request to start drag, " ++
-    "failed to validate pointer or touch serial {}", .{event.serial});
+        "failed to validate pointer or touch serial {}", .{event.serial});
     if (event.drag.source) |source| source.destroy();
 }
 
@@ -160,13 +142,13 @@ fn handleStartDrag(listener: *wl.Listener(*wlr.Drag), wlr_drag: *wlr.Drag) void 
     }
     wlr_drag.events.destroy.add(&seat.drag_destroy);
 
-    if (wlr_drag.icon) |wlr_drag_icon| {
-        DragIcon.create(wlr_drag_icon, &seat.cursor) catch {
-            log.err("out of memory", .{});
-            wlr_drag.seat_client.client.postNoMemory();
-            return;
-        };
-    }
+    //     if (wlr_drag.icon) |wlr_drag_icon| {
+    //         DragIcon.create(wlr_drag_icon, &seat.cursor) catch {
+    //             log.err("out of memory", .{});
+    //             wlr_drag.seat_client.client.postNoMemory();
+    //             return;
+    //         };
+    //     }
 }
 
 fn handleDragDestroy(listener: *wl.Listener(*wlr.Drag), _: *wlr.Drag) void {
@@ -186,8 +168,21 @@ fn handleDragDestroy(listener: *wl.Listener(*wlr.Drag), _: *wlr.Drag) void {
 
 fn handleRequestSetPrimarySelection(
     listener: *wl.Listener(*wlr.Seat.event.RequestSetPrimarySelection),
-                                    event: *wlr.Seat.event.RequestSetPrimarySelection,
+    event: *wlr.Seat.event.RequestSetPrimarySelection,
 ) void {
     const seat: *Seat = @fieldParentPtr("request_set_primary_selection", listener);
     seat.wlr_seat.setPrimarySelection(event.source, event.serial);
+}
+
+/// Repeat key mapping
+fn handleMappingRepeatTimeout(seat: *Seat) c_int {
+    if (seat.repeating_mapping) |mapping| {
+        const rate = server.config.repeat_rate;
+        const ms_delay = if (rate > 0) 1000 / rate else 0;
+        seat.mapping_repeat_timer.timerUpdate(ms_delay) catch {
+            log.err("failed to update mapping repeat timer", .{});
+        };
+        seat.runCommand(mapping.command_args);
+    }
+    return 0;
 }

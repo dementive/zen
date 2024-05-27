@@ -24,7 +24,7 @@ pub const Orientation = enum {
 const command_impls = std.ComptimeStringMap(
     *const fn (*Seat, []const [:0]const u8, *?[]const u8) Error!void,
     .{
-        .{ "spawn",                     @import("command/spawn.zig").spawn },
+        .{ "spawn",                     @import("commands/spawn.zig").spawn },
     },
 );
 // zig fmt: on

@@ -2,15 +2,21 @@ const std = @import("std");
 const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 
+const process = @import("process.zig");
 const Server = @import("server.zig");
 const util = @import("util.zig");
 
-pub fn main() anyerror!void {
-    wlr.log.init(.debug, null);
+pub var server: Server = undefined;
 
-    var server: Server = undefined;
+pub fn main() anyerror!void {
+    //wlr.log.init(.debug, null);
+
+    process.setup();
+
     try server.init();
     defer server.deinit();
+
+    try server.start();
 
     var buf: [11]u8 = undefined;
     const socket = try server.wl_server.addSocketAuto(&buf);
