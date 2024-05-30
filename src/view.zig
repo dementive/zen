@@ -4,7 +4,7 @@ const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 
 const Server = @import("server.zig");
-const util = @import("util.zig");
+const gpa = @import("utils/allocator.zig").gpa;
 
 server: *Server,
 link: wl.list.Link = undefined,
@@ -40,7 +40,7 @@ fn destroy(listener: *wl.Listener(void)) void {
     view.request_move.link.remove();
     view.request_resize.link.remove();
 
-    util.gpa.destroy(view);
+    gpa.destroy(view);
 }
 
 fn requestMove(

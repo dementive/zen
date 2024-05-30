@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const util = @import("util.zig");
+const gpa = @import("utils/allocator.zig").gpa;
 const Server = @import("server.zig");
 
 pub fn main() anyerror!void {
@@ -15,8 +15,8 @@ pub fn main() anyerror!void {
 
     if (std.os.argv.len >= 2) {
         const cmd = std.mem.span(std.os.argv[1]);
-        var child = std.ChildProcess.init(&[_][]const u8{ "/bin/sh", "-c", cmd }, util.gpa);
-        var env_map = try std.process.getEnvMap(util.gpa);
+        var child = std.ChildProcess.init(&[_][]const u8{ "/bin/sh", "-c", cmd }, gpa);
+        var env_map = try std.process.getEnvMap(gpa);
         defer env_map.deinit();
         try env_map.put("WAYLAND_DISPLAY", socket);
         child.env_map = &env_map;

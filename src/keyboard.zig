@@ -4,7 +4,7 @@ const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 const xkb = @import("xkbcommon");
 
-const util = @import("util.zig");
+const gpa = @import("utils/allocator.zig").gpa;
 const Server = @import("server.zig");
 
 server: *Server,
@@ -15,8 +15,8 @@ modifiers: wl.Listener(*wlr.Keyboard) = wl.Listener(*wlr.Keyboard).init(modifier
 key: wl.Listener(*wlr.Keyboard.event.Key) = wl.Listener(*wlr.Keyboard.event.Key).init(key),
 
 pub fn create(server: *Server, device: *wlr.InputDevice) !void {
-    const keyboard = try util.gpa.create(Keyboard);
-    errdefer util.gpa.destroy(keyboard);
+    const keyboard = try gpa.create(Keyboard);
+    errdefer gpa.destroy(keyboard);
 
     keyboard.* = .{
         .server = server,

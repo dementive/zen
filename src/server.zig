@@ -5,7 +5,8 @@ const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 const xkb = @import("xkbcommon");
 
-const util = @import("util.zig");
+const gpa = @import("utils/allocator.zig").gpa;
+const command = @import("command.zig");
 const View = @import("view.zig");
 const Keyboard = @import("keyboard.zig");
 const Output = @import("output.zig");
@@ -122,7 +123,7 @@ fn newXdgSurface(listener: *wl.Listener(*wlr.XdgSurface), xdg_surface: *wlr.XdgS
     switch (xdg_surface.role) {
         .toplevel => {
             // Don't add the view to server.views until it is mapped
-            const view = util.gpa.create(View) catch {
+            const view = gpa.create(View) catch {
                 std.log.err("failed to allocate new view", .{});
                 return;
             };
@@ -131,7 +132,7 @@ fn newXdgSurface(listener: *wl.Listener(*wlr.XdgSurface), xdg_surface: *wlr.XdgS
                 .server = server,
                 .xdg_surface = xdg_surface,
                 .scene_tree = server.scene.tree.createSceneXdgSurface(xdg_surface) catch {
-                    util.gpa.destroy(view);
+                    gpa.destroy(view);
                     std.log.err("failed to allocate new view", .{});
                     return;
                 },
@@ -362,12 +363,28 @@ fn cursorFrame(listener: *wl.Listener(*wlr.Cursor), _: *wlr.Cursor) void {
 pub fn handleKeybind(server: *Server, key: xkb.Keysym) bool {
     switch (@intFromEnum(key)) {
         // Exit the compositor
-        xkb.Keysym.Escape => server.wl_server.terminate(),
-        // Focus the next view in the stack, pushing the current top to the back
-        xkb.Keysym.F1 => {
-            if (server.views.length() < 2) return true;
-            const view: *View = @fieldParentPtr("link", server.views.link.prev.?);
-            server.focusView(view, view.xdg_surface.surface);
+        xkb.Keysym.Escape => {
+            std.debug.print("Goodbye World!\n", .{});
+            server.wl_server.terminate();
+        },
+        xkb.Keysym.F5 => {
+            var output: ?[]const u8 = null;
+            defer if (output) |s| gpa.free(s);
+            const args = [_][:0]const u8{ "spawn", "alacritty" };
+            command.run(&args, &output) catch |err| {
+                std.debug.print("Error: {s}", .{command.errToMsg(err)});
+                return false;
+                // const failure_message = switch (err) {
+                //     command.Error.OutOfMemory => {
+                //         //callback.getClient().postNoMemory();
+                //         std.log.info("Error: {s}", .{command.errToMsg(err)});
+                //     },
+                //     else => std.log.info("Error: {s}", .{command.errToMsg(err)}),
+                // };
+                // std.log.info("Error: {s}", .{failure_message});
+                //callback.sendFailure(failure_message);
+                //return false;
+            };
         },
         else => return false,
     }

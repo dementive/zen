@@ -5,7 +5,7 @@ const posix = std.posix;
 const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 
-const util = @import("util.zig");
+const gpa = @import("utils/allocator.zig").gpa;
 const Server = @import("server.zig");
 
 server: *Server,
@@ -18,7 +18,7 @@ destroy: wl.Listener(*wlr.Output) = wl.Listener(*wlr.Output).init(destroy),
 
 // The wlr.Output should be destroyed by the caller on failure to trigger cleanup.
 pub fn create(server: *Server, wlr_output: *wlr.Output) !void {
-    const output = try util.gpa.create(Output);
+    const output = try gpa.create(Output);
 
     output.* = .{
         .server = server,
@@ -60,5 +60,5 @@ fn destroy(listener: *wl.Listener(*wlr.Output), _: *wlr.Output) void {
     output.frame.link.remove();
     output.destroy.link.remove();
 
-    util.gpa.destroy(output);
+    gpa.destroy(output);
 }
