@@ -1,6 +1,7 @@
 const Server = @This();
 
 const std = @import("std");
+const posix = std.posix;
 const wl = @import("wayland").server.wl;
 const wlr = @import("wlroots");
 const xkb = @import("xkbcommon");
@@ -12,6 +13,9 @@ const Keyboard = @import("keyboard.zig");
 const Output = @import("output.zig");
 
 wl_server: *wl.Server,
+sigint_source: *wl.EventSource,
+sigterm_source: *wl.EventSource,
+
 backend: *wlr.Backend,
 renderer: *wlr.Renderer,
 allocator: *wlr.Allocator,
@@ -52,8 +56,12 @@ pub fn init(server: *Server) !void {
     const renderer = try wlr.Renderer.autocreate(backend);
     const output_layout = try wlr.OutputLayout.create();
     const scene = try wlr.Scene.create();
+    const loop = wl_server.getEventLoop();
+
     server.* = .{
         .wl_server = wl_server,
+        .sigint_source = try loop.addSignal(*wl.Server, posix.SIG.INT, terminate, wl_server),
+        .sigterm_source = try loop.addSignal(*wl.Server, posix.SIG.TERM, terminate, wl_server),
         .backend = backend,
         .renderer = renderer,
         .allocator = try wlr.Allocator.autocreate(backend, renderer),
@@ -92,6 +100,8 @@ pub fn init(server: *Server) !void {
 }
 
 pub fn deinit(server: *Server) void {
+    server.sigint_source.remove();
+    server.sigterm_source.remove();
     server.wl_server.destroyClients();
     server.wl_server.destroy();
 }
@@ -115,6 +125,12 @@ fn newOutput(listener: *wl.Listener(*wlr.Output), wlr_output: *wlr.Output) void 
         wlr_output.destroy();
         return;
     };
+}
+
+/// Handle SIGINT and SIGTERM by gracefully stopping the server
+fn terminate(_: c_int, wl_server: *wl.Server) c_int {
+    wl_server.terminate();
+    return 0;
 }
 
 fn newXdgSurface(listener: *wl.Listener(*wlr.XdgSurface), xdg_surface: *wlr.XdgSurface) void {
