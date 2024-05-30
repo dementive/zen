@@ -16,6 +16,16 @@ wl_server: *wl.Server,
 sigint_source: *wl.EventSource,
 sigterm_source: *wl.EventSource,
 
+shm: *wlr.Shm,
+drm: ?*wlr.Drm = null,
+linux_dmabuf: ?*wlr.LinuxDmabufV1 = null,
+single_pixel_buffer_manager: *wlr.SinglePixelBufferManagerV1,
+
+viewporter: *wlr.Viewporter,
+fractional_scale_manager: *wlr.FractionalScaleManagerV1,
+compositor: *wlr.Compositor,
+subcompositor: *wlr.Subcompositor,
+
 backend: *wlr.Backend,
 renderer: *wlr.Renderer,
 allocator: *wlr.Allocator,
@@ -26,9 +36,18 @@ scene_output_layout: *wlr.SceneOutputLayout,
 new_output: wl.Listener(*wlr.Output) = wl.Listener(*wlr.Output).init(newOutput),
 
 xdg_shell: *wlr.XdgShell,
-new_xdg_surface: wl.Listener(*wlr.XdgSurface) = wl.Listener(*wlr.XdgSurface).init(newXdgSurface),
-views: wl.list.Head(View, .link) = undefined,
+//xdg_decoration_manager: *wlr.XdgDecorationManagerV1, // TODO
+//layer_shell: *wlr.LayerShellV1, // TODO
+xdg_activation: *wlr.XdgActivationV1,
 
+data_device_manager: *wlr.DataDeviceManager,
+primary_selection_manager: *wlr.PrimarySelectionDeviceManagerV1,
+data_control_manager: *wlr.DataControlManagerV1,
+export_dmabuf_manager: *wlr.ExportDmabufManagerV1,
+screencopy_manager: *wlr.ScreencopyManagerV1,
+foreign_toplevel_manager: *wlr.ForeignToplevelManagerV1,
+
+views: wl.list.Head(View, .link) = undefined,
 seat: *wlr.Seat,
 new_input: wl.Listener(*wlr.InputDevice) = wl.Listener(*wlr.InputDevice).init(newInput),
 request_set_cursor: wl.Listener(*wlr.Seat.event.RequestSetCursor) = wl.Listener(*wlr.Seat.event.RequestSetCursor).init(requestSetCursor),
@@ -50,12 +69,19 @@ grab_y: f64 = 0,
 grab_box: wlr.Box = undefined,
 resize_edges: wlr.Edges = .{},
 
+new_xdg_surface: wl.Listener(*wlr.XdgSurface) = wl.Listener(*wlr.XdgSurface).init(newXdgSurface),
+// new_toplevel_decoration: wl.Listener(*wlr.XdgToplevelDecorationV1) = wl.Listener(*wlr.XdgToplevelDecorationV1).init(handleNewToplevelDecoration),
+// new_layer_surface: wl.Listener(*wlr.LayerSurfaceV1) = wl.Listener(*wlr.LayerSurfaceV1).init(handleNewLayerSurface),
+request_activate: wl.Listener(*wlr.XdgActivationV1.event.RequestActivate) =
+    wl.Listener(*wlr.XdgActivationV1.event.RequestActivate).init(handleRequestActivate),
+
 pub fn init(server: *Server) !void {
     const wl_server = try wl.Server.create();
     const backend = try wlr.Backend.autocreate(wl_server, null);
     const renderer = try wlr.Renderer.autocreate(backend);
     const output_layout = try wlr.OutputLayout.create();
     const scene = try wlr.Scene.create();
+    const compositor = try wlr.Compositor.create(wl_server, 6, renderer);
     const loop = wl_server.getEventLoop();
 
     server.* = .{
@@ -65,24 +91,55 @@ pub fn init(server: *Server) !void {
         .backend = backend,
         .renderer = renderer,
         .allocator = try wlr.Allocator.autocreate(backend, renderer),
+
+        .shm = try wlr.Shm.createWithRenderer(wl_server, 1, renderer),
+        .single_pixel_buffer_manager = try wlr.SinglePixelBufferManagerV1.create(wl_server),
+
+        .viewporter = try wlr.Viewporter.create(wl_server),
+        .fractional_scale_manager = try wlr.FractionalScaleManagerV1.create(wl_server, 1),
+        .compositor = compositor,
+        .subcompositor = try wlr.Subcompositor.create(wl_server),
+
         .scene = scene,
         .output_layout = output_layout,
         .scene_output_layout = try scene.attachOutputLayout(output_layout),
+
         .xdg_shell = try wlr.XdgShell.create(wl_server, 2),
+        //.xdg_decoration_manager = try wlr.XdgDecorationManagerV1.create(wl_server),
+        //.layer_shell = try wlr.LayerShellV1.create(wl_server, 4),
+        .xdg_activation = try wlr.XdgActivationV1.create(wl_server),
+
+        .data_device_manager = try wlr.DataDeviceManager.create(wl_server),
+        .primary_selection_manager = try wlr.PrimarySelectionDeviceManagerV1.create(wl_server),
+        .data_control_manager = try wlr.DataControlManagerV1.create(wl_server),
+        .export_dmabuf_manager = try wlr.ExportDmabufManagerV1.create(wl_server),
+        .screencopy_manager = try wlr.ScreencopyManagerV1.create(wl_server),
+        .foreign_toplevel_manager = try wlr.ForeignToplevelManagerV1.create(wl_server),
+
         .seat = try wlr.Seat.create(wl_server, "default"),
         .cursor = try wlr.Cursor.create(),
         .cursor_mgr = try wlr.XcursorManager.create(null, 24),
     };
 
-    try server.renderer.initServer(wl_server);
+    if (renderer.getDmabufFormats() != null and renderer.getDrmFd() >= 0) {
+        server.drm = try wlr.Drm.create(wl_server, renderer);
+        server.linux_dmabuf = try wlr.LinuxDmabufV1.createWithRenderer(wl_server, 4, renderer);
+    }
 
-    _ = try wlr.Compositor.create(server.wl_server, 6, server.renderer);
-    _ = try wlr.Subcompositor.create(server.wl_server);
+    // if (build_options.xwayland and runtime_xwayland) {
+    //     server.xwayland = try wlr.Xwayland.create(wl_server, compositor, false);
+    //     server.xwayland.?.events.new_surface.add(&server.new_xwayland_surface);
+    // }
+
+    //try server.renderer.initServer(wl_server);
     _ = try wlr.DataDeviceManager.create(server.wl_server);
 
     server.backend.events.new_output.add(&server.new_output);
 
     server.xdg_shell.events.new_surface.add(&server.new_xdg_surface);
+    //server.xdg_decoration_manager.events.new_toplevel_decoration.add(&server.new_toplevel_decoration);
+    //server.layer_shell.events.new_surface.add(&server.new_layer_surface);
+    server.xdg_activation.events.request_activate.add(&server.request_activate);
     server.views.init();
 
     server.backend.events.new_input.add(&server.new_input);
@@ -102,6 +159,8 @@ pub fn init(server: *Server) !void {
 pub fn deinit(server: *Server) void {
     server.sigint_source.remove();
     server.sigterm_source.remove();
+
+    server.new_xdg_surface.link.remove();
     server.wl_server.destroyClients();
     server.wl_server.destroy();
 }
@@ -178,6 +237,74 @@ fn newXdgSurface(listener: *wl.Listener(*wlr.XdgSurface), xdg_surface: *wlr.XdgS
         },
         .none => unreachable,
     }
+}
+
+// fn handleNewToplevelDecoration(
+//     _: *wl.Listener(*wlr.XdgToplevelDecorationV1),
+//     _: *wlr.XdgToplevelDecorationV1,
+// ) void {
+//     return;
+//     // TODO
+//     //XdgDecoration.init(wlr_decoration);
+// }
+
+// fn handleNewLayerSurface(listener: *wl.Listener(*wlr.LayerSurfaceV1), wlr_layer_surface: *wlr.LayerSurfaceV1) void {
+//     const server: *Server = @fieldParentPtr("new_layer_surface", listener);
+
+//     std.log.debug(
+//         "new layer surface: namespace {s}, layer {s}, anchor {b:0>4}, size {},{}, margin {},{},{},{}, exclusive_zone {}",
+//         .{
+//             wlr_layer_surface.namespace,
+//             @tagName(wlr_layer_surface.current.layer),
+//             @as(u32, @bitCast(wlr_layer_surface.current.anchor)),
+//             wlr_layer_surface.current.desired_width,
+//             wlr_layer_surface.current.desired_height,
+//             wlr_layer_surface.current.margin.top,
+//             wlr_layer_surface.current.margin.right,
+//             wlr_layer_surface.current.margin.bottom,
+//             wlr_layer_surface.current.margin.left,
+//             wlr_layer_surface.current.exclusive_zone,
+//         },
+//     );
+
+//     // If the new layer surface does not have an output assigned to it, use the
+//     // first output or close the surface if none are available.
+//     if (wlr_layer_surface.output == null) {
+//         const output = server.input_manager.defaultSeat().focused_output orelse {
+//             std.log.err("no output available for layer surface '{s}'", .{wlr_layer_surface.namespace});
+//             wlr_layer_surface.destroy();
+//             return;
+//         };
+
+//         std.log.debug("new layer surface had null output, assigning it to output '{s}'", .{output.wlr_output.name});
+//         wlr_layer_surface.output = output.wlr_output;
+//     }
+
+//     // TODO
+//     // LayerSurface.create(wlr_layer_surface) catch {
+//     //     wlr_layer_surface.resource.postNoMemory();
+//     //     return;
+//     // };
+// }
+
+fn handleRequestActivate(
+    _: *wl.Listener(*wlr.XdgActivationV1.event.RequestActivate),
+    _: *wlr.XdgActivationV1.event.RequestActivate,
+) void {
+    return;
+    // TODO
+    // const server: *Server = @fieldParentPtr("request_activate", listener);
+
+    // const node_data = SceneNodeData.fromSurface(event.surface) orelse return;
+    // switch (node_data.data) {
+    //     .view => |view| if (view.pending.focus == 0) {
+    //         view.pending.urgent = true;
+    //         server.root.applyPending();
+    //     },
+    //     else => |tag| {
+    //         log.info("ignoring xdg-activation-v1 activate request of {s} surface", .{@tagName(tag)});
+    //     },
+    // }
 }
 
 const ViewAtResult = struct {
